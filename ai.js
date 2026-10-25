@@ -1,0 +1,24 @@
+/* Local AI fallback + optional server API. No key needed for offline play. */
+const AI={difficulty:"medium",lastReasoning:null,
+WORD_PAIRS:[
+{normal:"TEA",imposter:"COFFEE",cat:"drinks",nr:["hot","leaf","kettle","chai"],ir:["bean","espresso","caffeine","roast"]},
+{normal:"BEACH",imposter:"DESERT",cat:"places",nr:["sand","waves","shore","sea"],ir:["dunes","camel","dry","heat"]},
+{normal:"PIZZA",imposter:"BURGER",cat:"food",nr:["cheese","slice","oven","italian"],ir:["bun","patty","fries","fast food"]},
+{normal:"RAIN",imposter:"SNOW",cat:"weather",nr:["umbrella","drops","monsoon","wet"],ir:["cold","white","winter","flakes"]},
+{normal:"BOOK",imposter:"MOVIE",cat:"entertainment",nr:["pages","library","read","author"],ir:["cinema","screen","popcorn","actor"]},
+{normal:"BICYCLE",imposter:"CAR",cat:"transport",nr:["pedal","helmet","wheels","exercise"],ir:["engine","fuel","petrol","driver"]},
+{normal:"DOG",imposter:"CAT",cat:"pets",nr:["bark","loyal","walk","bone"],ir:["meow","whiskers","purr","independent"]},
+{normal:"DOCTOR",imposter:"TEACHER",cat:"jobs",nr:["hospital","medicine","patient","stethoscope"],ir:["school","classroom","students","lessons"]},
+{normal:"GUITAR",imposter:"PIANO",cat:"music",nr:["strings","strum","acoustic","chords"],ir:["keys","grand","pedals","ivory"]},
+{normal:"MOON",imposter:"SUN",cat:"sky",nr:["night","craters","tides","phases"],ir:["day","hot","sunrise","solar"]},
+{normal:"TRAIN",imposter:"AIRPLANE",cat:"travel",nr:["tracks","station","platform","whistle"],ir:["wings","airport","pilot","takeoff"]},
+{normal:"CRICKET",imposter:"FOOTBALL",cat:"sports",nr:["bat","wicket","innings","stumps"],ir:["goal","kick","referee","penalty"]}],
+async api(path,body){try{const c=new AbortController(),t=setTimeout(()=>c.abort(),9000);const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:c.signal});clearTimeout(t);if(!r.ok)return null;return await r.json()}catch{return null}},
+async makeClue(p,clues,diff){if(diff!=="easy"){const r=await AI.api("/api/clue",{word:p.word,difficulty:diff,clues:clues.map(c=>c.player+": "+c.text)});if(r&&r.clue)return r.clue}return AI.localClue(p,clues,diff)},
+localClue(p,clues,diff){const pair=AI.WORD_PAIRS.find(x=>x.normal===p.word||x.imposter===p.word);if(!pair)return"It is something people commonly know.";const rel=pair.normal===p.word?pair.nr:pair.ir,w=rel[Math.floor(Math.random()*rel.length)];return diff==="hard"&&clues.length>=2?"It is connected to "+pair.cat+".":diff==="easy"?"It is closely linked to "+w+".":"You might think of "+w+" here."},
+vec(text){const v={};String(text).toLowerCase().split(/[^a-z]+/).filter(x=>x.length>2).forEach(x=>{v[x]=(v[x]||0)+1;for(let i=0;i<x.length-2;i++){const g="~"+x.slice(i,i+3);v[g]=(v[g]||0)+.4}});return v},
+cosine(a,b){let d=0,x=0,y=0;for(const k in a){x+=a[k]*a[k];if(b[k])d+=a[k]*b[k]}for(const k in b)y+=b[k]*b[k];return x&&y?d/Math.sqrt(x*y):0},
+localVote(players,clues,aiIndex,diff){const scores={},noise={easy:1.1,medium:.45,hard:.1}[diff]||.45;players.forEach((p,i)=>{if(i===aiIndex)return;const mine=clues.filter(c=>c.player===p.name),other=clues.filter(c=>c.player!==p.name);let s=0,n=0;mine.forEach(a=>other.forEach(b=>{s+=AI.cosine(AI.vec(a.text),AI.vec(b.text));n++}));scores[i]=Math.round(Math.max(0,Math.min(1,1-(n?s/n:0)+(Math.random()-.5)*noise))*100)});return scores},
+async vote(players,clues,aiIndex,diff){let scores=null,reason="",source="Local similarity";if(diff!=="easy"){const r=await AI.api("/api/vote",{word:players[aiIndex].word,difficulty:diff,players:players.filter((p,i)=>i!==aiIndex).map(p=>p.name),clues:clues.map(c=>c.player+": "+c.text)});if(r&&r.scores){scores={};players.forEach((p,i)=>{if(i!==aiIndex&&typeof r.scores[p.name]==="number")scores[i]=r.scores[p.name]});if(Object.keys(scores).length){reason=r.reason||"";source="Claude LLM"}else scores=null}}if(!scores){scores=AI.localVote(players,clues,aiIndex,diff);reason="Local fallback compares clue wording and similarity; it is a heuristic, not a trained language model."}let target=null;Object.keys(scores).forEach(k=>{if(target===null||scores[k]>scores[target])target=k});return{target:target===null?null:Number(target),scores,reason,source}},
+renderReasoning(){const box=document.getElementById("aiReasoning"),r=AI.lastReasoning;if(!box)return;if(!r){box.innerHTML="";return}box.innerHTML='<p class="eyebrow">HOW THE AI THOUGHT · '+r.source+'</p>'+Object.keys(r.scores).sort((a,b)=>r.scores[b]-r.scores[a]).map(i=>'<div class="score-row"><span>'+safe(gamePlayers[Number(i)]?.name||"Player")+'</span><strong>'+r.scores[i]+'% suspicious</strong></div>').join("")+'<p class="muted">'+safe(r.reason)+'</p>';function safe(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}}
+};
